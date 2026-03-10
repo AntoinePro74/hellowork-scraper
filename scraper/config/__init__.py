@@ -1,0 +1,7 @@
+"""
+Package pour la configuration du scraper HelloWork.
+"""
+
+from .settings import SCRAPE_DELAY, MAX_RETRIES, TIMEOUT, SELENIUM_CONFIG, USER_AGENT, OUTPUT_FILES, LOGGING_CONFIG
+
+__all__ = ["SCRAPE_DELAY", "MAX_RETRIES", "TIMEOUT", "SELENIUM_CONFIG", "USER_AGENT", "OUTPUT_FILES", "LOGGING_CONFIG"]
