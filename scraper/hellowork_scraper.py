@@ -274,7 +274,8 @@ class HelloWorkScraper:
     def scrape_search_with_details(
         self,
         search_url: str,
-        max_pages: Optional[int] = None
+        max_pages: Optional[int] = None,
+        db_manager=None
     ) -> List[JobOffer]:
         """
         Scrape les offres d'emploi avec leurs détails complets.
@@ -282,6 +283,7 @@ class HelloWorkScraper:
         Args:
             search_url (str): URL de recherche HelloWork
             max_pages (Optional[int]): Nombre maximum de pages à scraper
+            db_manager (Optional): DatabaseManager pour vérifier les offres déjà en base
 
         Returns:
             List[JobOffer]: Liste des offres avec tous les détails
@@ -289,10 +291,33 @@ class HelloWorkScraper:
         # D'abord récupérer les offres de base (avec pagination)
         basic_offers = self.scrape_search_results(search_url, max_pages=max_pages)
 
-        # Ensuite récupérer les détails pour chaque offre
-        detailed_offers = self.scrape_job_details(basic_offers)
+        if db_manager is not None:
+            # Vérifier quelles URLs sont déjà en DB pour éviter de scraper les détails
+            all_urls = [j['url'] for j in basic_offers]
+            existing_urls = db_manager.get_existing_urls(all_urls)
 
-        return detailed_offers
+            new_offers_dicts = [j for j in basic_offers if j['url'] not in existing_urls]
+            known_offers_dicts = [j for j in basic_offers if j['url'] in existing_urls]
+
+            self.logger.info(
+                f"{len(new_offers_dicts)} nouvelles offres à scraper, "
+                f"{len(known_offers_dicts)} déjà en base (détails non scrapés)"
+            )
+
+            # Scraper les détails uniquement pour les nouvelles offres
+            detailed_new = self.scrape_job_details(new_offers_dicts)
+
+            # Créer des JobOffer minimaux pour les offres connues (sans scraper détails)
+            known_job_offers = [
+                JobOffer(title=j['title'], url=j['url'], new_offer=False)
+                for j in known_offers_dicts
+            ]
+
+            return detailed_new + known_job_offers
+        else:
+            # Mode sans DB : scraper toutes les offres normalement
+            detailed_offers = self.scrape_job_details(basic_offers)
+            return detailed_offers
 
     def save_to_csv(self, job_offers: List[JobOffer], filename: str = "job_offers_detailed.csv"):
         """
