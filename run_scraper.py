@@ -178,6 +178,13 @@ def main():
         if known_urls:
             db.mark_known_offers_not_new(known_urls)
 
+        # Update last_seen_at for all scraped offers
+        all_scraped_urls = [offer.url for offer in all_job_offers]
+        db.update_last_seen(all_scraped_urls)
+
+        # Mark offers as inactive if not seen in 7 days
+        inactive_count = db.mark_inactive_if_unseen(days=7)
+
         # Export des données
         logger.info("\n" + "=" * 70)
         logger.info("EXPORT DES DONNÉES")
@@ -200,6 +207,8 @@ def main():
         logger.info(f"  - {total_known} offres déjà en base (non scrapées)")
         logger.info(f"  - {len(all_job_offers)} offres trouvées au total")
         logger.info(f"  - {unique_urls} offres uniques (après déduplication)")
+        if inactive_count > 0:
+            logger.info(f"  - {inactive_count} offres marquées comme inactives (non vues depuis 7 jours)")
 
         logger.info("\n" + "=" * 70)
         logger.info("SCRAPING TERMINÉ AVEC SUCCÈS")

@@ -72,6 +72,8 @@ class DatabaseManager:
 
             # Apply migrations for future columns
             self._add_column_if_not_exists('applied', 'BOOLEAN DEFAULT FALSE')
+            self._add_column_if_not_exists('last_seen_at', 'TIMESTAMP DEFAULT NOW()')
+            self._add_column_if_not_exists('is_active', 'BOOLEAN DEFAULT TRUE')
         except psycopg2.Error as e:
             self.conn.rollback()
             logger.error(f"Failed to create table: {e}")
@@ -221,3 +223,57 @@ class DatabaseManager:
             self.conn.rollback()
             logger.error(f"Failed to mark offer as applied: {e}")
             return False
+
+    def update_last_seen(self, urls: List[str]) -> int:
+        """
+        Update last_seen_at to NOW() for all given URLs.
+
+        Args:
+            urls: List of URLs to update
+
+        Returns:
+            Number of offers updated
+        """
+        if not urls:
+            return 0
+
+        try:
+            # Build query with placeholders for each URL
+            placeholders = ",".join(["%s"] * len(urls))
+            query = f"UPDATE job_offers SET last_seen_at = NOW() WHERE url IN ({placeholders});"
+            self.cursor.execute(query, urls)
+            self.conn.commit()
+            updated_count = self.cursor.rowcount
+            logger.info(f"Updated last_seen_at for {updated_count} offers")
+            return updated_count
+        except psycopg2.Error as e:
+            self.conn.rollback()
+            logger.error(f"Failed to update last_seen_at: {e}")
+            return 0
+
+    def mark_inactive_if_unseen(self, days: int = 7) -> int:
+        """
+        Mark offers as inactive if not seen in the last N days.
+
+        Args:
+            days: Number of days threshold (default: 7)
+
+        Returns:
+            Number of offers marked as inactive
+        """
+        try:
+            query = f"""
+            UPDATE job_offers
+            SET is_active = False
+            WHERE is_active = True AND last_seen_at < NOW() - INTERVAL '{days} days';
+            """
+            self.cursor.execute(query)
+            self.conn.commit()
+            inactive_count = self.cursor.rowcount
+            if inactive_count > 0:
+                logger.info(f"Marked {inactive_count} offers as inactive (not seen in {days} days)")
+            return inactive_count
+        except psycopg2.Error as e:
+            self.conn.rollback()
+            logger.error(f"Failed to mark offers as inactive: {e}")
+            return 0
