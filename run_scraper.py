@@ -15,7 +15,7 @@ from datetime import datetime
 from scraper.hellowork_scraper import HelloWorkScraper
 from scraper.models.job_offer import JobOffer
 from scraper.database.db_manager import DatabaseManager
-from config import SEARCH_URLS
+from config import SEARCH_PROFILES
 
 # Dossier de sortie
 OUTPUT_DIR = Path("data")
@@ -120,14 +120,19 @@ def main():
     logger = logging.getLogger(__name__)
 
     # Déterminer les URLs à scraper
-    urls_to_scrape = args.urls if args.urls else SEARCH_URLS
+    if args.urls:
+        urls_to_scrape = args.urls
+        profiles_to_scrape = [{"label": url, "url": url} for url in urls_to_scrape]
+    else:
+        profiles_to_scrape = [p for p in SEARCH_PROFILES if p["site"] == "hellowork"]
+        urls_to_scrape = [p["url"] for p in profiles_to_scrape]
 
     logger.info("=" * 70)
     logger.info("SCRAPER HELLOWORK")
     logger.info("=" * 70)
-    logger.info(f"Nombre d'URLs à scraper : {len(urls_to_scrape)}")
+    logger.info(f"Nombre de profils à scraper : {len(profiles_to_scrape)}")
     if args.max_pages:
-        logger.info(f"Limitation : {args.max_pages} pages maximum par URL")
+        logger.info(f"Limitation : {args.max_pages} pages maximum par profil")
 
     scraper = HelloWorkScraper(headless=True)
     all_job_offers = []
@@ -138,16 +143,16 @@ def main():
     db.create_table()
 
     try:
-        # Scraping pour chaque URL
-        for i, url in enumerate(urls_to_scrape, 1):
+        # Scraping pour chaque profil
+        for i, profile in enumerate(profiles_to_scrape, 1):
             logger.info(f"\n{'=' * 70}")
-            logger.info(f"URL {i}/{len(urls_to_scrape)}")
+            logger.info(f"Profil {i}/{len(profiles_to_scrape)}")
             logger.info(f"{'=' * 70}")
-            logger.info(f"URL de recherche : {url}")
+            logger.info(f"Profil : {profile['label']} — {profile['url']}")
 
             # Scraping complet : recherche + détails (avec vérification DB)
             logger.info("Lancement du scraping...")
-            job_offers = scraper.scrape_search_with_details(url, max_pages=args.max_pages, db_manager=db)
+            job_offers = scraper.scrape_search_with_details(profile['url'], max_pages=args.max_pages, db_manager=db)
 
             # Compter les offres nouvelles vs connues
             new_count = sum(1 for offer in job_offers if offer.new_offer)
@@ -155,8 +160,8 @@ def main():
             logger.info(f"{len(job_offers)} offres trouvées : {new_count} nouvelles, {known_count} déjà en base")
             all_job_offers.extend(job_offers)
 
-            # Pause entre les URLs
-            if i < len(urls_to_scrape):
+            # Pause entre les profils
+            if i < len(profiles_to_scrape):
                 logger.info("Pause de 5 secondes avant la prochaine URL...")
                 import time
                 time.sleep(5)
