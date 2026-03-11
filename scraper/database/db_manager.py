@@ -69,6 +69,9 @@ class DatabaseManager:
             self.cursor.execute(create_table_query)
             self.conn.commit()
             logger.info("Ensured job_offers table exists")
+
+            # Apply migrations for future columns
+            self._add_column_if_not_exists('applied', 'BOOLEAN DEFAULT FALSE')
         except psycopg2.Error as e:
             self.conn.rollback()
             logger.error(f"Failed to create table: {e}")
@@ -193,3 +196,28 @@ class DatabaseManager:
             self.conn.rollback()
             logger.error(f"Failed to insert job offers: {e}")
             raise
+
+    def mark_applied(self, url: str) -> bool:
+        """
+        Mark a job offer as applied.
+
+        Args:
+            url: URL of the offer to mark as applied
+
+        Returns:
+            True if the offer was updated, False if not found
+        """
+        try:
+            query = "UPDATE job_offers SET applied = True WHERE url = %s;"
+            self.cursor.execute(query, (url,))
+            self.conn.commit()
+            updated = self.cursor.rowcount > 0
+            if updated:
+                logger.info(f"Marked offer as applied: {url}")
+            else:
+                logger.warning(f"Offer not found: {url}")
+            return updated
+        except psycopg2.Error as e:
+            self.conn.rollback()
+            logger.error(f"Failed to mark offer as applied: {e}")
+            return False
