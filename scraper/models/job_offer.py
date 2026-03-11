@@ -31,13 +31,15 @@ class RemoteWorkType(Enum):
 @dataclass
 class JobOffer:
     """
-    Modèle représentant une offre d'emploi HelloWork.
+    Modèle représentant une offre d'emploi.
 
     Attributes:
         title (str): Titre de l'offre
         url (str): URL de l'offre
         employment_type (EmploymentType): Type de contrat
         remote_work (RemoteWorkType): Type de télétravail
+        source (str): Source du scraping (hellowork, welcometothejungle, jobup, etc.)
+        new_offer (bool): True si l'offre est nouvelle (non présente en DB), False sinon
         salary (Optional[str]): Salaire proposé
         description (Optional[str]): Description complète de l'offre
         company (Optional[str]): Nom de l'entreprise
@@ -49,6 +51,8 @@ class JobOffer:
     url: str
     employment_type: EmploymentType = EmploymentType.UNKNOWN
     remote_work: RemoteWorkType = RemoteWorkType.UNKNOWN
+    source: str = "hellowork"
+    new_offer: bool = True
     salary: Optional[str] = None
     description: Optional[str] = None
     company: Optional[str] = None
@@ -67,6 +71,8 @@ class JobOffer:
             "url": self.url,
             "employment_type": self.employment_type.value,
             "remote_work": self.remote_work.value,
+            "source": self.source,
+            "new_offer": self.new_offer,
             "salary": self.salary,
             "description": self.description,
             "company": self.company,
