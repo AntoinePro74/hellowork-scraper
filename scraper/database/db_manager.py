@@ -1,10 +1,10 @@
-import os
 import psycopg2
 from psycopg2.extras import execute_batch
 from typing import List
 import logging
 
 from scraper.models.job_offer import JobOffer
+from scraper.config.settings import DB_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -13,28 +13,17 @@ class DatabaseManager:
     """Manages PostgreSQL connections and job offer persistence."""
 
     def __init__(self):
-        """Initialize database connection parameters from environment variables."""
-        self.host = os.getenv("DB_HOST", "localhost")
-        self.port = int(os.getenv("DB_PORT", 5432))
-        self.dbname = os.getenv("DB_NAME", "hellowork")
-        self.user = os.getenv("DB_USER", "postgres")
-        self.password = os.getenv("DB_PASSWORD", "")
+        """Initialize database manager with centralized config."""
         self.conn = None
         self.cursor = None
 
     def connect(self):
         """Establish a connection to PostgreSQL."""
         try:
-            self.conn = psycopg2.connect(
-                host=self.host,
-                port=self.port,
-                database=self.dbname,
-                user=self.user,
-                password=self.password,
-            )
+            self.conn = psycopg2.connect(**DB_CONFIG)
             self.cursor = self.conn.cursor()
             logger.info(
-                f"Connected to PostgreSQL: {self.user}@{self.host}:{self.port}/{self.dbname}"
+                f"Connected to PostgreSQL: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}"
             )
         except psycopg2.Error as e:
             logger.error(f"Failed to connect to PostgreSQL: {e}")
