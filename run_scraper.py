@@ -14,6 +14,7 @@ from pathlib import Path
 from datetime import datetime
 from scraper.hellowork_scraper import HelloWorkScraper
 from scraper.models.job_offer import JobOffer
+from scraper.database.db_manager import DatabaseManager
 from config import SEARCH_URLS
 
 # Dossier de sortie
@@ -58,6 +59,24 @@ def save_to_json(job_offers: list, filename: str):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     logging.info(f"{len(job_offers)} offres sauvegardées dans {filename}")
+
+
+def save_to_postgres(job_offers: list):
+    """
+    Sauvegarde les offres dans PostgreSQL.
+
+    Args:
+        job_offers (list): Liste des offres à sauvegarder
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_table()
+            inserted = db.insert_job_offers(job_offers)
+            logging.info(f"{inserted} offres sauvegardées dans PostgreSQL")
+    except Exception as e:
+        logging.error(f"Erreur lors de la sauvegarde en PostgreSQL : {e}")
+        # Continue execution even if database save fails
+        raise
 
 
 def print_summary(job_offers: list):
@@ -113,6 +132,11 @@ def main():
     scraper = HelloWorkScraper(headless=True)
     all_job_offers = []
 
+    # Ouvrir la connexion DB avant le scraping
+    db = DatabaseManager()
+    db.connect()
+    db.create_table()
+
     try:
         # Scraping pour chaque URL
         for i, url in enumerate(urls_to_scrape, 1):
@@ -121,11 +145,14 @@ def main():
             logger.info(f"{'=' * 70}")
             logger.info(f"URL de recherche : {url}")
 
-            # Scraping complet : recherche + détails
+            # Scraping complet : recherche + détails (avec vérification DB)
             logger.info("Lancement du scraping...")
-            job_offers = scraper.scrape_search_with_details(url, max_pages=args.max_pages)
+            job_offers = scraper.scrape_search_with_details(url, max_pages=args.max_pages, db_manager=db)
 
-            logger.info(f"{len(job_offers)} offres collectées avec leurs détails")
+            # Compter les offres nouvelles vs connues
+            new_count = sum(1 for offer in job_offers if offer.new_offer)
+            known_count = sum(1 for offer in job_offers if not offer.new_offer)
+            logger.info(f"{len(job_offers)} offres trouvées : {new_count} nouvelles, {known_count} déjà en base")
             all_job_offers.extend(job_offers)
 
             # Pause entre les URLs
@@ -146,6 +173,11 @@ def main():
         csv_file = OUTPUT_DIR / f"job_offers_{timestamp}.csv"
         json_file = OUTPUT_DIR / f"job_offers_{timestamp}.json"
 
+        # Marquer les offres connues comme "not new" dans la base avant l'insertion
+        known_urls = [offer.url for offer in all_job_offers if not offer.new_offer]
+        if known_urls:
+            db.mark_known_offers_not_new(known_urls)
+
         # Export des données
         logger.info("\n" + "=" * 70)
         logger.info("EXPORT DES DONNÉES")
@@ -153,10 +185,21 @@ def main():
 
         save_to_csv(all_job_offers, str(csv_file))
         save_to_json(all_job_offers, str(json_file))
+        save_to_postgres(all_job_offers)
 
         logger.info(f"\nFichiers générés :")
         logger.info(f"  - CSV : {csv_file.absolute()}")
         logger.info(f"  - JSON: {json_file.absolute()}")
+
+        # Bilan des offres nouvelles vs connues (avec déduplication)
+        total_new = sum(1 for offer in all_job_offers if offer.new_offer)
+        total_known = sum(1 for offer in all_job_offers if not offer.new_offer)
+        unique_urls = len(set(offer.url for offer in all_job_offers))
+        logger.info(f"\nBilan final :")
+        logger.info(f"  - {total_new} nouvelles offres scrapées")
+        logger.info(f"  - {total_known} offres déjà en base (non scrapées)")
+        logger.info(f"  - {len(all_job_offers)} offres trouvées au total")
+        logger.info(f"  - {unique_urls} offres uniques (après déduplication)")
 
         logger.info("\n" + "=" * 70)
         logger.info("SCRAPING TERMINÉ AVEC SUCCÈS")
@@ -170,7 +213,8 @@ def main():
 
     finally:
         scraper.close()
-        logger.info("Scraper fermé proprement")
+        db.close()
+        logger.info("Scraper et base de données fermés proprement")
 
 
 if __name__ == "__main__":
