@@ -202,7 +202,13 @@ def main():
 
         save_to_csv(all_job_offers, str(csv_file))
         save_to_json(all_job_offers, str(json_file))
-        save_to_postgres(all_job_offers)
+
+        if args.rescrape_existing:
+            db.mark_known_offers_not_new([o.url for o in all_job_offers])
+            db.upsert_job_offers(all_job_offers)
+            logger.info("Mode rescrape : upsert effectué en base pour toutes les offres")
+        else:
+            save_to_postgres(all_job_offers)
 
         logger.info(f"\nFichiers générés :")
         logger.info(f"  - CSV : {csv_file.absolute()}")

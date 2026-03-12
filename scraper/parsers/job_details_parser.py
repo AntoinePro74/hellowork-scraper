@@ -264,7 +264,7 @@ class JobDetailsParser:
             if missions_container:
                 missions_text = missions_container.get_text(separator="\n", strip=True)
                 if missions_text:
-                    description_parts.append(missions_text)
+                    description_parts.append("=== Les missions du poste ===\n" + missions_text)
 
             # 2. Itérer sur tous les blocs <details>
             details_blocks = soup.find_all("details")
