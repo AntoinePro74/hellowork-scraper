@@ -247,8 +247,8 @@ class JobDetailsParser:
     def _extract_description(self, soup: BeautifulSoup) -> Optional[str]:
         """
         Extrait la description complète de l'offre.
-        Récupère tous les paragraphes <p> dans le conteneur tw-gap-8.
-        Plusieurs div peuvent avoir cette classe, on prend celui qui contient des paragraphes.
+        Récupère le contenu des missions via data-truncate-text-target,
+        puis itère sur les balises <details> pour extraire les sections supplémentaires.
 
         Args:
             soup (BeautifulSoup): Objet BeautifulSoup de la page
@@ -257,22 +257,45 @@ class JobDetailsParser:
             Optional[str]: Description complète ou None si non trouvée
         """
         try:
-            # Trouver tous les conteneurs de description
-            description_containers = soup.find_all("div", class_="tw-gap-8")
+            description_parts = []
 
-            # Prendre le premier conteneur qui contient des paragraphes
-            for container in description_containers:
-                paragraphs = container.find_all("p")
-                if paragraphs:
-                    # Joindre les paragraphes avec des sauts de ligne
-                    description_parts = []
-                    for p in paragraphs:
-                        text = p.get_text(separator="\n", strip=True)
-                        if text:  # Ignorer les paragraphes vides
-                            description_parts.append(text)
+            # 1. Récupérer le contenu des missions
+            missions_container = soup.find("div", attrs={"data-truncate-text-target": "content"})
+            if missions_container:
+                missions_text = missions_container.get_text(separator="\n", strip=True)
+                if missions_text:
+                    description_parts.append(missions_text)
 
-                    if description_parts:
-                        return "\n\n".join(description_parts)
+            # 2. Itérer sur tous les blocs <details>
+            details_blocks = soup.find_all("details")
+            for detail_block in details_blocks:
+                # Extraire le titre depuis summary > span avec class contenant tw-typo-m-bold
+                title_span = detail_block.find("summary")
+                if title_span:
+                    title_span = title_span.find("span", class_=re.compile(r"tw-typo-m-bold"))
+                    if title_span:
+                        title = title_span.get_text(separator="\n", strip=True)
+                    else:
+                        title = None
+                else:
+                    title = None
+
+                # Extraire le contenu depuis div avec class contenant tw-typo-long-m
+                content_div = detail_block.find("div", class_=re.compile(r"tw-typo-long-m"))
+                if content_div:
+                    content = content_div.get_text(separator="\n", strip=True)
+                else:
+                    content = None
+
+                # Ajouter à description_parts avec le format "=== Titre ===\nContenu"
+                if title and content:
+                    description_parts.append(f"=== {title} ===\n{content}")
+                elif content:
+                    description_parts.append(content)
+
+            # 3. Joindre toutes les sections
+            if description_parts:
+                return "\n\n".join(description_parts)
 
             return None
         except Exception as e:
