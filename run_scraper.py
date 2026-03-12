@@ -114,6 +114,11 @@ def main():
         default=None,
         help="URLs de recherche HelloWork (par défaut: URLs prédéfinies)"
     )
+    parser.add_argument(
+        "--rescrape-existing",
+        action="store_true",
+        help="Force le re-scraping et la mise à jour en base des offres déjà connues"
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -152,7 +157,7 @@ def main():
 
             # Scraping complet : recherche + détails (avec vérification DB)
             logger.info("Lancement du scraping...")
-            job_offers = scraper.scrape_search_with_details(profile['url'], max_pages=args.max_pages, db_manager=db)
+            job_offers = scraper.scrape_search_with_details(profile['url'], max_pages=args.max_pages, db_manager=db, rescrape_existing=args.rescrape_existing)
 
             # Compter les offres nouvelles vs connues
             new_count = sum(1 for offer in job_offers if offer.new_offer)

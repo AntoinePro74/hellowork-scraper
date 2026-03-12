@@ -199,6 +199,63 @@ class DatabaseManager:
             logger.error(f"Failed to insert job offers: {e}")
             raise
 
+    def upsert_job_offers(self, job_offers: List[JobOffer]) -> int:
+        """
+        Insert job offers into the database, updating existing ones (by URL).
+
+        Args:
+            job_offers: List of JobOffer objects
+
+        Returns:
+            Number of offers upserted
+        """
+        if not job_offers:
+            logger.info("No job offers to upsert")
+            return 0
+
+        upsert_query = """
+        INSERT INTO job_offers
+        (title, url, company, location, employment_type, remote_work, source, new_offer, salary, description, date_posted)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (url) DO UPDATE SET
+            title = EXCLUDED.title,
+            company = EXCLUDED.company,
+            location = EXCLUDED.location,
+            employment_type = EXCLUDED.employment_type,
+            remote_work = EXCLUDED.remote_work,
+            salary = EXCLUDED.salary,
+            description = EXCLUDED.description,
+            date_posted = EXCLUDED.date_posted;
+        """
+
+        data = [
+            (
+                offer.title,
+                offer.url,
+                offer.company,
+                offer.location,
+                offer.employment_type.value,
+                offer.remote_work.value,
+                offer.source,
+                offer.new_offer,
+                offer.salary,
+                offer.description,
+                offer.date_posted,
+            )
+            for offer in job_offers
+        ]
+
+        try:
+            execute_batch(self.cursor, upsert_query, data, page_size=100)
+            self.conn.commit()
+            upserted_count = self.cursor.rowcount
+            logger.info(f"Upserted {upserted_count} job offers into database")
+            return upserted_count
+        except psycopg2.Error as e:
+            self.conn.rollback()
+            logger.error(f"Failed to upsert job offers: {e}")
+            raise
+
     def mark_applied(self, url: str) -> bool:
         """
         Mark a job offer as applied.
