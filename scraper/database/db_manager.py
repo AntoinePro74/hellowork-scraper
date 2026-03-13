@@ -74,6 +74,11 @@ class DatabaseManager:
             self._add_column_if_not_exists('applied', 'BOOLEAN DEFAULT FALSE')
             self._add_column_if_not_exists('last_seen_at', 'TIMESTAMP DEFAULT NOW()')
             self._add_column_if_not_exists('is_active', 'BOOLEAN DEFAULT TRUE')
+            # AI scoring columns
+            self._add_column_if_not_exists('ai_score', 'FLOAT')
+            self._add_column_if_not_exists('ai_recommendation', 'TEXT')
+            self._add_column_if_not_exists('ai_analysis', 'TEXT')
+            self._add_column_if_not_exists('scored_at', 'TIMESTAMP')
         except psycopg2.Error as e:
             self.conn.rollback()
             logger.error(f"Failed to create table: {e}")

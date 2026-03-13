@@ -18,20 +18,59 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _has_scoring_columns(db: DatabaseManager) -> bool:
+    """Check if ai_score and ai_recommendation columns exist."""
+    try:
+        query = """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='job_offers' AND column_name='ai_score'
+            );
+        """
+        db.cursor.execute(query)
+        return db.cursor.fetchone()[0]
+    except Exception as e:
+        logger.warning(f"Could not check for scoring columns: {e}")
+        return False
+
+
 def list_offers(db: DatabaseManager, filter_type: str):
     """List job offers with optional filtering."""
     try:
+        has_scoring = _has_scoring_columns(db)
+
         if filter_type == "new":
-            query = "SELECT url, title, company, new_offer, applied FROM job_offers WHERE new_offer = True ORDER BY scraped_at DESC;"
+            base_query = "SELECT url, title, company, new_offer, applied"
+            if has_scoring:
+                base_query += ", ai_score, ai_recommendation"
+            base_query += " FROM job_offers WHERE new_offer = True"
+            if has_scoring:
+                base_query += " ORDER BY ai_score DESC NULLS LAST, scraped_at DESC"
+            else:
+                base_query += " ORDER BY scraped_at DESC"
             title = "NEW OFFERS (new_offer = True)"
         elif filter_type == "applied":
-            query = "SELECT url, title, company, new_offer, applied FROM job_offers WHERE applied = True ORDER BY scraped_at DESC;"
+            base_query = "SELECT url, title, company, new_offer, applied"
+            if has_scoring:
+                base_query += ", ai_score, ai_recommendation"
+            base_query += " FROM job_offers WHERE applied = True"
+            if has_scoring:
+                base_query += " ORDER BY ai_score DESC NULLS LAST, scraped_at DESC"
+            else:
+                base_query += " ORDER BY scraped_at DESC"
             title = "APPLIED OFFERS (applied = True)"
         else:
-            query = "SELECT url, title, company, new_offer, applied FROM job_offers ORDER BY scraped_at DESC;"
+            base_query = "SELECT url, title, company, new_offer, applied"
+            if has_scoring:
+                base_query += ", ai_score, ai_recommendation"
+            base_query += " FROM job_offers"
+            if has_scoring:
+                base_query += " ORDER BY ai_score DESC NULLS LAST, scraped_at DESC"
+            else:
+                base_query += " ORDER BY scraped_at DESC"
             title = "ALL OFFERS"
 
-        db.cursor.execute(query)
+        db.cursor.execute(base_query)
         rows = db.cursor.fetchall()
 
         if not rows:
@@ -40,15 +79,30 @@ def list_offers(db: DatabaseManager, filter_type: str):
             return
 
         # Format for display
-        headers = ["URL", "Title", "Company", "New", "Applied"]
-        formatted_rows = [
-            (row[0][:60] + "..." if len(row[0]) > 60 else row[0],
-             row[1][:40] + "..." if len(row[1]) > 40 else row[1],
-             row[2] or "N/A",
-             "✓" if row[3] else " ",
-             "✓" if row[4] else " ")
-            for row in rows
-        ]
+        if has_scoring:
+            headers = ["URL", "Title", "Company", "New", "Applied", "Score", "Reco"]
+            formatted_rows = [
+                (
+                    row[0][:60] + "..." if len(row[0]) > 60 else row[0],
+                    row[1][:40] + "..." if len(row[1]) > 40 else row[1],
+                    row[2] or "N/A",
+                    "✓" if row[3] else " ",
+                    "✓" if row[4] else " ",
+                    f"{row[5]:.1f}" if row[5] is not None else "--",
+                    row[6] if row[6] else "--"
+                )
+                for row in rows
+            ]
+        else:
+            headers = ["URL", "Title", "Company", "New", "Applied"]
+            formatted_rows = [
+                (row[0][:60] + "..." if len(row[0]) > 60 else row[0],
+                 row[1][:40] + "..." if len(row[1]) > 40 else row[1],
+                 row[2] or "N/A",
+                 "✓" if row[3] else " ",
+                 "✓" if row[4] else " ")
+                for row in rows
+            ]
 
         print(f"\n{title}")
         print(tabulate(formatted_rows, headers=headers, tablefmt="grid"))
@@ -89,7 +143,7 @@ def show_stats(db: DatabaseManager):
         db.cursor.execute("SELECT COUNT(*) FROM job_offers WHERE new_offer = False AND applied = False;")
         inactive = db.cursor.fetchone()[0]
 
-        # Display stats
+        # Display basic stats
         stats_data = [
             ["Total offers", total],
             ["New offers (to apply)", new_count],
@@ -101,6 +155,63 @@ def show_stats(db: DatabaseManager):
         print("JOB OFFERS STATISTICS")
         print("=" * 60)
         print(tabulate(stats_data, headers=["Metric", "Count"], tablefmt="grid"))
+
+        # Check if scoring columns exist
+        try:
+            query = """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='job_offers' AND column_name='ai_score'
+                );
+            """
+            db.cursor.execute(query)
+            has_scoring = db.cursor.fetchone()[0]
+        except Exception as e:
+            logger.warning(f"Could not check for scoring columns: {e}")
+            has_scoring = False
+
+        # Add scoring stats if available
+        if has_scoring:
+            # Scored offers
+            db.cursor.execute("SELECT COUNT(*) FROM job_offers WHERE ai_score IS NOT NULL;")
+            scored_count = db.cursor.fetchone()[0]
+
+            # Average score
+            db.cursor.execute("SELECT AVG(ai_score) FROM job_offers WHERE ai_score IS NOT NULL;")
+            avg_score_row = db.cursor.fetchone()
+            avg_score = avg_score_row[0] if avg_score_row[0] is not None else 0
+
+            # Recommendations distribution
+            db.cursor.execute("""
+                SELECT ai_recommendation, COUNT(*)
+                FROM job_offers
+                WHERE ai_recommendation IS NOT NULL
+                GROUP BY ai_recommendation
+                ORDER BY ai_recommendation;
+            """)
+            reco_rows = db.cursor.fetchall()
+
+            # Build distribution string
+            reco_dist = []
+            for reco, count in reco_rows:
+                reco_dist.append(f"{reco} {count}")
+
+            # Not scored
+            not_scored = total - scored_count if total else 0
+
+            # Add scoring section
+            print("-" * 60)
+            print("AI SCORING")
+            print("-" * 60)
+
+            scoring_data = [
+                ["Scored offers", scored_count],
+                ["Average score", f"{avg_score:.1f}/10" if avg_score else "N/A"],
+                ["Recommandation distribution", " | ".join(reco_dist) if reco_dist else "N/A"],
+                ["Not scored yet", not_scored],
+            ]
+            print(tabulate(scoring_data, headers=["Metric", "Count/Value"], tablefmt="grid"))
+
         print("=" * 60 + "\n")
 
     except Exception as e:

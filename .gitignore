@@ -33,3 +33,6 @@ config.py
 
 # Environment variables
 .env
+
+# Prompt de scoring IA - données personnelles
+scoring_prompt.py
