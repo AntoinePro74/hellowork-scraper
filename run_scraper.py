@@ -13,6 +13,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 from scraper.hellowork_scraper import HelloWorkScraper
+from scraper.wttj_scraper import WttjScraper
 from scraper.models.job_offer import JobOffer
 from scraper.database.db_manager import DatabaseManager
 from config import SEARCH_PROFILES
@@ -119,28 +120,39 @@ def main():
         action="store_true",
         help="Force le re-scraping et la mise à jour en base des offres déjà connues"
     )
+    parser.add_argument(
+        "--visible",
+        action="store_true",
+        help="Affiche les navigateurs (mode non-headless)"
+    )
     args = parser.parse_args()
 
     setup_logging()
     logger = logging.getLogger(__name__)
 
+    # Registre des scrapers disponibles
+    SCRAPER_REGISTRY = {
+        "hellowork": HelloWorkScraper,
+        "wttj": WttjScraper,
+    }
+
     # Déterminer les URLs à scraper
     if args.urls:
         urls_to_scrape = args.urls
-        profiles_to_scrape = [{"label": url, "url": url} for url in urls_to_scrape]
+        profiles_to_scrape = [{"label": url, "url": url, "site": "hellowork"} for url in urls_to_scrape]
     else:
-        profiles_to_scrape = [p for p in SEARCH_PROFILES if p["site"] == "hellowork"]
+        profiles_to_scrape = SEARCH_PROFILES
         urls_to_scrape = [p["url"] for p in profiles_to_scrape]
 
     logger.info("=" * 70)
-    logger.info("SCRAPER HELLOWORK")
+    logger.info("SCRAPER MULTI-SITES")
     logger.info("=" * 70)
     logger.info(f"Nombre de profils à scraper : {len(profiles_to_scrape)}")
     if args.max_pages:
         logger.info(f"Limitation : {args.max_pages} pages maximum par profil")
 
-    scraper = HelloWorkScraper(headless=True)
     all_job_offers = []
+    scrapers_instances = []  # pour le finally
 
     # Ouvrir la connexion DB avant le scraping
     db = DatabaseManager()
@@ -155,9 +167,25 @@ def main():
             logger.info(f"{'=' * 70}")
             logger.info(f"Profil : {profile['label']} — {profile['url']}")
 
+            # Déterminer le scraper à utiliser selon le site
+            site = profile.get("site", "hellowork")
+            scraper_class = SCRAPER_REGISTRY.get(site)
+            if not scraper_class:
+                logger.error(f"Site inconnu: {site}. Skipping profile.")
+                continue
+
+            # Instancier le scraper (headless = not args.visible)
+            scraper = scraper_class(headless=not args.visible)
+            scrapers_instances.append(scraper)
+
             # Scraping complet : recherche + détails (avec vérification DB)
-            logger.info("Lancement du scraping...")
-            job_offers = scraper.scrape_search_with_details(profile['url'], max_pages=args.max_pages, db_manager=db, rescrape_existing=args.rescrape_existing)
+            logger.info(f"Lancement du scraping avec {site}...")
+            job_offers = scraper.scrape_search_with_details(
+                profile['url'],
+                max_pages=args.max_pages,
+                db_manager=db,
+                rescrape_existing=args.rescrape_existing
+            )
 
             # Compter les offres nouvelles vs connues
             new_count = sum(1 for offer in job_offers if offer.new_offer)
@@ -237,9 +265,14 @@ def main():
         raise
 
     finally:
-        scraper.close()
+        # Fermer tous les scrapers instanciés
+        for scraper in scrapers_instances:
+            try:
+                scraper.close()
+            except Exception as e:
+                logger.warning(f"Erreur lors de la fermeture d'un scraper: {e}")
         db.close()
-        logger.info("Scraper et base de données fermés proprement")
+        logger.info("Scrapers et base de données fermés proprement")
 
 
 if __name__ == "__main__":
