@@ -1,25 +1,27 @@
-# HelloWork Job Scraper
+# Multi-Site Job Scraper
 
-Un outil Python de veille automatisée des offres d'emploi sur [HelloWork](https://www.hellowork.com/), 
-conçu pour **gagner du temps dans la recherche d'emploi** : collecter, scorer, dédupliquer, 
-suivre et piloter ses candidatures depuis un seul endroit.
+Un outil Python de veille automatisée des offres d'emploi sur **HelloWork** et 
+**Welcome to the Jungle**, conçu pour **gagner du temps dans la recherche d'emploi** : 
+collecter, scorer, dédupliquer, suivre et piloter ses candidatures depuis un seul endroit.
 
 ## Objectif
 
-La recherche d'emploi implique de consulter régulièrement les mêmes sites, 
-de retrouver des offres déjà vues et de perdre le fil de ses candidatures. 
-Ce scraper automatise la veille et centralise toutes les offres avec scoring généré par l'ia dans une base 
-PostgreSQL pour se concentrer sur l'essentiel : postuler aux bonnes offres.
+La recherche d'emploi implique de consulter régulièrement les mêmes sites,
+de retrouver des offres déjà vues et de perdre le fil de ses candidatures.
+Ce scraper automatise la veille et centralise toutes les offres avec scoring
+généré par l'IA dans une base PostgreSQL pour se concentrer sur l'essentiel :
+postuler aux bonnes offres.
 
 **Ce que ça change concrètement :**
 - Lance le scraper → seules les **nouvelles offres** sont scrapées (les connues sont ignorées)
 - Consulte les nouvelles offres en une commande
-- Score l'offre avec l'ia
+- Score l'offre avec l'IA
 - Marque une candidature en une ligne de terminal
 - Suit ses stats : offres vues, postulées, expirées
 
 ## Fonctionnalités
 
+- **Multi-sources** : HelloWork et Welcome to the Jungle dans un seul run
 - Scraping des pages de résultats avec gestion de la pagination
 - Extraction des détails complets : titre, entreprise, localisation, contrat, télétravail, salaire, description, date
 - **Déduplication automatique** : vérifie chaque URL en base avant de scraper les détails
@@ -38,19 +40,23 @@ PostgreSQL pour se concentrer sur l'essentiel : postuler aux bonnes offres.
 
 ```
 .
-├── run_scraper.py              # Script principal de scraping
+├── run_scraper.py              # Script principal multi-sites
 ├── manage_jobs.py              # CLI de gestion des offres en base
+├── score_jobs.py               # Scoring IA des offres
 ├── config.py                   # Profils de recherche (non versionné)
 ├── config.example.py           # Template de configuration
 ├── requirements.txt
-├── .env                        # Credentials PostgreSQL (non versionné)
+├── .env                        # Credentials PostgreSQL + OpenRouter (non versionné)
 ├── .env.example                # Template .env
 ├── scraper/
-│   ├── hellowork_scraper.py    # Scraper HelloWork (Selenium)
+│   ├── base_scraper.py         # Classe abstraite BaseScraper (architecture commune)
+│   ├── hellowork_scraper.py    # Scraper HelloWork (hérite de BaseScraper)
+│   ├── wttj_scraper.py         # Scraper Welcome to the Jungle (hérite de BaseScraper)
 │   ├── models/
 │   │   └── job_offer.py        # Modèle de données JobOffer
 │   ├── parsers/
-│   │   └── job_details_parser.py
+│   │   ├── job_details_parser.py        # Parseur détails HelloWork
+│   │   └── wttj_job_details_parser.py   # Parseur détails WTTJ
 │   ├── database/
 │   │   └── db_manager.py       # Gestion PostgreSQL
 │   └── config/
@@ -61,11 +67,36 @@ PostgreSQL pour se concentrer sur l'essentiel : postuler aux bonnes offres.
 └── data/                       # Export CSV/JSON (optionnel)
 ```
 
+### Architecture extensible
+
+Le projet repose sur une classe abstraite `BaseScraper` qui centralise la logique
+commune (driver Selenium, pipeline scraping, gestion DB). Ajouter une nouvelle
+source se résume à créer un fichier `xxx_scraper.py` héritant de `BaseScraper`
+et l'enregistrer dans le `SCRAPER_REGISTRY` de `run_scraper.py`.
+
+```python
+# Ajouter une nouvelle source en 2 étapes :
+
+# 1. scraper/xxx_scraper.py
+class XxxScraper(BaseScraper):
+    def _get_total_pages(self, search_url): ...
+    def _build_page_url(self, base_url, page): ...
+    def scrape_search_results(self, search_url, max_pages=None): ...
+    def scrape_job_details(self, job_offers): ...
+
+# 2. run_scraper.py
+SCRAPER_REGISTRY = {
+    "hellowork": HelloWorkScraper,
+    "wttj": WttjScraper,
+    "xxx": XxxScraper,   # ← ajouter ici
+}
+```
+
 ## Prérequis
 
 - Python 3.10+
 - PostgreSQL 14+
-- Google Chrome + ChromeDriver (compatibles)
+- Google Chrome + ChromeDriver (compatibles, gérés automatiquement par `webdriver-manager`)
 - Compte [OpenRouter](https://openrouter.ai/) (accès gratuit disponible)
 
 ## Installation
@@ -85,7 +116,7 @@ pip install -r requirements.txt
 
 # 4. Configurer les variables d'environnement
 cp .env.example .env
-# Renseigner : DATABASE_URL, OPENROUTER_API_KEY
+# Renseigner : DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, OPENROUTER_API_KEY
 ```
 
 ## Configuration
@@ -93,10 +124,7 @@ cp .env.example .env
 ### Base de données PostgreSQL
 
 ```bash
-# Créer la base de données
 createdb job_scraper
-
-# Copier et remplir le fichier .env
 cp .env.example .env
 ```
 
@@ -119,18 +147,21 @@ La table `job_offers` est créée **automatiquement** au premier lancement.
 cp config.example.py config.py
 ```
 
-Éditer `config.py` :
+Éditer `config.py` — chaque profil doit spécifier le champ `"site"` :
+
 ```python
 SEARCH_PROFILES = [
+    # Profils HelloWork
     {
-        "label": "Account Manager France CDI",
         "site": "hellowork",
+        "label": "Account Manager France CDI",
         "url": "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=account+manager&l=France&c=CDI"
     },
+    # Profils Welcome to the Jungle
     {
-        "label": "Data Analyst Rhône-Alpes",
-        "site": "hellowork",
-        "url": "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=data+analyst&l=Rhône-Alpes"
+        "site": "wttj",
+        "label": "Account Manager WTTJ",
+        "url": "https://www.welcometothejungle.com/fr/jobs?query=%22Account%20Manager%22&refinementList%5Bcontract_type%5D%5B%5D=full_time&refinementList%5Boffices.country_code%5D%5B%5D=FR&refinementList%5Bremote%5D%5B%5D=fulltime&page=1&sortBy=mostRecent"
     },
 ]
 ```
@@ -140,14 +171,17 @@ SEARCH_PROFILES = [
 ### Lancer le scraper
 
 ```bash
-# Scraping complet (tous les profils)
+# Scraping complet (tous les profils, toutes les sources)
 python run_scraper.py
 
 # Limiter à N pages par profil (test rapide)
 python run_scraper.py --max-pages 2
 
-# Avec export CSV/JSON en plus
-python run_scraper.py --export
+# Afficher les navigateurs (debug, mode non-headless)
+python run_scraper.py --visible
+
+# Re-scraper les offres déjà connues en base
+python run_scraper.py --rescrape-existing
 ```
 
 ### Scorer les offres (IA)
@@ -190,10 +224,10 @@ JOB OFFERS STATISTICS
 ============================================================
 | Metric                             |   Count |
 |------------------------------------|---------|
-| Total offers                       |     104 |
-| New offers (to apply)              |       3 |
+| Total offers                       |     147 |
+| New offers (to apply)              |      51 |
 | Applied offers                     |       2 |
-| Inactive offers                    |     101 |
+| Inactive offers                    |      94 |
 ============================================================
 ```
 
@@ -201,7 +235,8 @@ JOB OFFERS STATISTICS
 
 ## 🤖 Scoring IA — Détail
 
-Le scoring utilise un prompt personnalisé basé sur le profil du candidat. Chaque offre est évaluée sur 5 critères pondérés :
+Le scoring utilise un prompt personnalisé basé sur le profil du candidat.
+Chaque offre est évaluée sur 5 critères pondérés :
 
 | Critère | Pondération |
 |---|---|
@@ -240,7 +275,7 @@ CREATE TABLE job_offers (
     location        TEXT,
     employment_type TEXT,
     remote_work     TEXT,
-    source          TEXT DEFAULT 'hellowork',
+    source          TEXT,                   -- 'hellowork' ou 'wttj'
     salary          TEXT,
     description     TEXT,
     date_posted     TEXT,
@@ -256,18 +291,18 @@ CREATE TABLE job_offers (
 
 ```sql
 -- Nouvelles offres à traiter
-SELECT title, company, location, url 
+SELECT title, company, location, url
 FROM job_offers WHERE new_offer = TRUE AND is_active = TRUE;
 
 -- Mes candidatures
-SELECT title, company, location, scraped_at 
+SELECT title, company, location, scraped_at
 FROM job_offers WHERE applied = TRUE;
 
 -- Offres par source
 SELECT source, COUNT(*) FROM job_offers GROUP BY source;
 
 -- Nouvelles offres cette semaine
-SELECT COUNT(*) FROM job_offers 
+SELECT COUNT(*) FROM job_offers
 WHERE scraped_at > NOW() - INTERVAL '7 days';
 ```
 
@@ -283,7 +318,12 @@ WHERE scraped_at > NOW() - INTERVAL '7 days';
 
 ---
 
-## 🔧 Configuration
+## 🔧 Personnalisation
+
+### `scoring/scoring_prompt.py`
+
+Personnalise le prompt avec ton profil (expérience, compétences, critères de
+recherche, localisation). C'est le fichier clé à adapter à ta situation.
 
 ### `.env`
 
@@ -292,10 +332,6 @@ DATABASE_URL=postgresql://user:password@localhost:5432/job_scraper
 OPENROUTER_API_KEY=sk-or-xxxxxxxxxxxx
 ```
 
-### `scoring/scoring_prompt.py`
-
-Personnalise le prompt avec ton profil (expérience, compétences, critères de recherche, localisation). C'est le fichier clé à adapter à ta situation.
-
 ---
 
 ## 📊 Performances observées
@@ -303,13 +339,13 @@ Personnalise le prompt avec ton profil (expérience, compétences, critères de 
 - **Taux de scoring réussi** : ~85% (limite du modèle free OpenRouter)
 - **Taux de parsing valide** : ~92% des réponses exploitables
 - **Durée par offre** : ~15-20 secondes (latence API)
-- **Corpus testé** : 112 offres, score moyen 4.5/10
+- **Corpus testé** : 147 offres multi-sources, score moyen 4.5/10
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Ajout scraper WelcomeToTheJungle
+- [x] Ajout scraper Welcome to the Jungle
 - [ ] Ajout scraper JobUp.ch (marché franco-suisse)
 - [ ] Dashboard de visualisation (Metabase / Power BI)
 - [ ] Déduplication avancée sur `(title, company, location)`
