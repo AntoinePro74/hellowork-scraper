@@ -7,7 +7,10 @@ Manage job offers database: view, filter, and apply to offers.
 
 import argparse
 import logging
+from datetime import datetime
+from pathlib import Path
 from tabulate import tabulate
+import pandas as pd
 from scraper.database.db_manager import DatabaseManager
 
 # Setup logging
@@ -122,6 +125,62 @@ def apply_offer(db: DatabaseManager, url: str):
             print(f"\n✗ Offer not found: {url}\n")
     except Exception as e:
         logger.error(f"Error applying offer: {e}")
+
+
+def handle_export(args, db: DatabaseManager):
+    """Export job offers to CSV with optional filters."""
+    try:
+        # Build query - always select active offers
+        query = "SELECT * FROM job_offers WHERE is_active = TRUE"
+        params = []
+
+        # Apply --new-only filter if provided
+        if args.new_only:
+            query += " AND new_offer = TRUE"
+
+        # Apply --min-score filter if provided (check if ai_score column exists)
+        if args.min_score is not None:
+            # Check if ai_score column exists
+            has_scoring = _has_scoring_columns(db)
+            if has_scoring:
+                query += " AND ai_score >= ?"
+                params.append(args.min_score)
+            else:
+                logger.warning("--min-score requested but ai_score column not found. Ignoring filter.")
+
+        query += " ORDER BY scraped_at DESC"
+
+        # Execute query
+        db.cursor.execute(query, params)
+        rows = db.cursor.fetchall()
+
+        if not rows:
+            logger.info("No job offers match the export criteria.")
+            return
+
+        # Get column names
+        col_names = [description[0] for description in db.cursor.description]
+
+        # Create DataFrame
+        df = pd.DataFrame(rows, columns=col_names)
+
+        # Determine output path
+        if args.output:
+            output_path = Path(args.output)
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = Path(f"data/export_{timestamp}.csv")
+
+        # Create data/ directory if it doesn't exist
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write CSV
+        df.to_csv(output_path, index=False)
+
+        logger.info(f"{len(df)} offres exportées dans {output_path}")
+
+    except Exception as e:
+        logger.error(f"Error exporting offers: {e}")
 
 
 def show_stats(db: DatabaseManager):
@@ -266,6 +325,24 @@ def main():
     # stats command
     subparsers.add_parser("stats", help="Show database statistics")
 
+    # export command
+    export_parser = subparsers.add_parser("export", help="Export job offers to CSV")
+    export_parser.add_argument(
+        "--output",
+        type=str,
+        help="Path to output CSV file (default: data/export_YYYYMMDD_HHMMSS.csv)"
+    )
+    export_parser.add_argument(
+        "--min-score",
+        type=float,
+        help="Filter offers with ai_score >= value (optional)"
+    )
+    export_parser.add_argument(
+        "--new-only",
+        action="store_true",
+        help="Export only new offers (new_offer=True)"
+    )
+
     args = parser.parse_args()
 
     # Initialize database
@@ -287,6 +364,9 @@ def main():
 
         elif args.command == "stats":
             show_stats(db)
+
+        elif args.command == "export":
+            handle_export(args, db)
 
         else:
             parser.print_help()
